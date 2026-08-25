@@ -1,0 +1,56 @@
+name: Keep Osanshouo Supabase Active
+
+on:
+  schedule:
+    - cron: "0 0,12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: osanshouo-supabase-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Query Supabase database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          http_code="$(curl \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --max-time 30 \
+            --output response.json \
+            --write-out "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/game_saves?select=user_id&limit=1" \
+            --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            --header "Accept: application/json" \
+            --header "Prefer: count=exact")"
+
+          if [ "$http_code" != "200" ] && [ "$http_code" != "206" ]; then
+            echo "Supabase keepalive failed with HTTP $http_code"
+            exit 1
+          fi
+
+          echo "Supabase database request succeeded: HTTP $http_code"
+
+      - name: Record successful run
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive-last-run
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive-last-run
+          git commit -m "chore: record Supabase keepalive" || exit 0
+          git push
